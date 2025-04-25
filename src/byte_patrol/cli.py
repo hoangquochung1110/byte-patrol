@@ -7,7 +7,8 @@ from pathlib import Path
 import click
 
 from byte_patrol.config import OPENROUTER_API_KEY, OPENROUTER_BASE_URL, get_llm
-from byte_patrol.prompt_engine.prompt_templates import cr_prompt
+from byte_patrol.prompt_engine.prompt_templates import (code_review_prompt,
+                                                        code_suggestion_prompt)
 
 
 @click.command(help="Review code documentation via an LLM")
@@ -29,8 +30,10 @@ def main(file, timeout, max_tokens, areas, style):
     click.echo(f"Reviewing file {file} (timeout={timeout}s, max_tokens={max_tokens})...", nl=True)
     # Format prompt and send to LLM using the pipeline syntax
     areas_str = ", ".join(areas)
-    documentation_review = (cr_prompt | llm).invoke({"code": code, "areas": areas_str, "style": style}).content
-    click.echo(documentation_review)
+    code_review = (code_review_prompt | llm).invoke({"code": code, "areas": areas_str, "style": style}).content
+    click.echo(code_review)
+    code_suggestion = (code_suggestion_prompt | llm).invoke({"code_review": code_review}).content
+    click.echo(code_suggestion)
     return 0
 
 
