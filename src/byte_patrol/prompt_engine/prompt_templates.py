@@ -17,10 +17,12 @@ cr_parser = PydanticOutputParser(pydantic_object=CodeReview)
 
 # Define prompt templates with structured outputs
 cr_prompt = PromptTemplate(
-    input_variables=["code", "areas"],
+    input_variables=["code", "areas", "style"],
     template=(
-        "Review the following code in terms of {areas}. "
-        "Be concise and focus only on the most important aspects.\n{format_instructions}\nCode:\n{code}"
+        "Review the following code in terms of {areas}.\n"
+        "Writing Style: {style}\n"
+        "Format instruction: {format_instructions}\n"
+        "Code:\n{code}"
     ),
     partial_variables={"format_instructions": cr_parser.get_format_instructions()}
 )
