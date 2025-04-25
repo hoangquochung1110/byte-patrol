@@ -7,7 +7,7 @@ from pathlib import Path
 
 import click
 
-from src.byte_patrol.ai_connector.service import get_structured_output
+from src.byte_patrol.ai_connector.service import get_model_response
 from src.byte_patrol.config import OPENROUTER_API_KEY, OPENROUTER_BASE_URL
 from src.byte_patrol.prompt_engine.prompt_templates import (
     CodeReviewResponse, DocumentationReview, code_review_prompt,
@@ -38,7 +38,7 @@ def review_documentation(file_path, timeout, max_tokens):
     
     # Format prompt and send to LLM using function calling
     formatted_prompt = documentation_review_prompt.format(code=code)
-    documentation_review = get_structured_output(formatted_prompt, DocumentationReview, **llm_kwargs)
+    documentation_review = get_model_response(formatted_prompt, DocumentationReview, **llm_kwargs)
     
     # Print the structured output in a readable format
     click.echo("\n=== Documentation Review ===")
@@ -64,7 +64,7 @@ def review_code(file_path, timeout, max_tokens):
     
     # Format prompt and send to LLM using function calling
     formatted_prompt = code_review_prompt.format(code=code)
-    code_review = get_structured_output(formatted_prompt, CodeReviewResponse, **llm_kwargs)
+    code_review = get_model_response(formatted_prompt, CodeReviewResponse, **llm_kwargs)
     
     # Print the structured output in a readable format
     click.echo("\n=== Code Review ===")

@@ -45,7 +45,7 @@ def pydantic_to_function_schema(model_class: Type[BaseModel]) -> dict:
         }
     }
 
-def get_structured_output(prompt: str, model_class: Type[BaseModel], **llm_kwargs) -> BaseModel:
+def get_model_response(prompt: str, model_class: Type[BaseModel], **llm_kwargs) -> BaseModel:
     """
     Send a prompt to the AI service and return a structured response using function calling.
     
