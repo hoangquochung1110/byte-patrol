@@ -1,0 +1,23 @@
+[project]
+name = "byte-patrol"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "langchain-openai>=0.3.14",
+    "langchain>=0.3.24",
+    "pytest>=8.3.5",
+    "python-dotenv>=1.1.0",
+]
+
+[project.scripts]
+"byte-patrol" = "byte_patrol.cli:main"
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["byte_patrol*"]
