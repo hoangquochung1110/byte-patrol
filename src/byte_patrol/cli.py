@@ -2,55 +2,35 @@
 """
 CLI entry point for byte-patrol.
 """
-import argparse
 from pathlib import Path
 
+import click
 
 from byte_patrol.config import OPENROUTER_API_KEY, OPENROUTER_BASE_URL, get_llm
-from byte_patrol.prompt_engine.prompt_templates import \
-    documentation_review_prompt
+from byte_patrol.prompt_engine.prompt_templates import cr_prompt
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        prog="byte-patrol",
-        description="Review code documentation via an LLM"
-    )
-    parser.add_argument(
-        "file",
-        type=Path,
-        help="Path to the source code file to review"
-    )
-    parser.add_argument(
-        "-t", "--timeout",
-        type=float,
-        default=30,
-        help="LLM request timeout in seconds"
-    )
-    parser.add_argument(
-        "-m", "--max-tokens",
-        type=int,
-        default=200,
-        help="Maximum number of tokens in the response"
-    )
-    args = parser.parse_args()
-
-    # ensure file exists
-    if not args.file.exists():
-        parser.error(f"File {args.file} not found.")
-
+@click.command(help="Review code documentation via an LLM")
+@click.argument('file', type=click.Path(exists=True, path_type=Path))
+@click.option('-t', '--timeout', type=float, default=30, help="LLM request timeout in seconds")
+@click.option('-m', '--max-tokens', type=int, default=200, help="Maximum number of tokens in the response")
+@click.option('-a', '--areas', type=str, default=["documentation"], multiple=True, help="Areas to review (can be specified multiple times)")
+def main(file, timeout, max_tokens, areas):
     # ensure LLM env is configured
     if not OPENROUTER_API_KEY or not OPENROUTER_BASE_URL:
-        parser.error("OPENROUTER_API_KEY and OPENROUTER_BASE_URL must be set in environment.")
+        click.echo("OPENROUTER_API_KEY and OPENROUTER_BASE_URL must be set in environment.", err=True)
+        return 1
 
-    code = args.file.read_text()
-    llm = get_llm(request_timeout=args.timeout, max_tokens=args.max_tokens)
+    code = file.read_text()
+    llm = get_llm(request_timeout=timeout, max_tokens=max_tokens)
     # notify user of progress
-    print(f"Reviewing file {args.file} (timeout={args.timeout}s, max_tokens={args.max_tokens})...", flush=True)
+    click.echo(f"Reviewing file {file} (timeout={timeout}s, max_tokens={max_tokens})...", nl=True)
     # Format prompt and send to LLM using the pipeline syntax
-    documentation_review = (documentation_review_prompt | llm).invoke({"code": code}).content
-    print(documentation_review)
+    areas_str = ", ".join(areas)
+    documentation_review = (cr_prompt | llm).invoke({"code": code, "areas": areas_str}).content
+    click.echo(documentation_review)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    main()  # pylint: disable=no-value-for-parameter
