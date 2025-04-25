@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "click>=8.1.8",
     "langchain-openai>=0.3.14",
     "langchain>=0.3.24",
     "pytest>=8.3.5",
@@ -13,7 +14,7 @@ dependencies = [
 ]
 
 [project.scripts]
-"byte-patrol" = "byte_patrol.cli:main"
+"bp" = "byte_patrol.cli:main"
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]

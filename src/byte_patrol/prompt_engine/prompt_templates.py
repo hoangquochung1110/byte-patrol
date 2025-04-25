@@ -1,46 +1,26 @@
 from langchain.prompts import PromptTemplate
+from langchain_core.output_parsers.pydantic import PydanticOutputParser
 from pydantic import BaseModel, Field
-from typing import List, Optional
+
 
 # Define Pydantic models for structured outputs
-class DocumentationReview(BaseModel):
-    issues: List[str] = Field(description="Documentation issues identified in the code")
-    suggestions: List[str] = Field(description="Specific suggestions for improvement")
+class CodeReview(BaseModel):
+    issues: list[str] = Field(description="Documentation issues identified in the code")
+    suggestions: list[str] = Field(description="Specific suggestions for improvement")
     rating: int = Field(description="Overall documentation quality rating (1-10)")
 
-class CodeReviewFinding(BaseModel):
-    issue_type: str = Field(description="Category of the issue (e.g., 'documentation', 'performance', 'security')")
-    severity: str = Field(description="Severity level (critical, high, medium, low)")
-    description: str = Field(description="Detailed explanation of the issue")
-    code_snippet: Optional[str] = Field(description="Relevant code causing the issue", default=None)
-    suggestion: str = Field(description="Recommended fix or improvement")
-    line_numbers: Optional[List[int]] = Field(description="Affected line numbers", default=None)
 
-class CodeReviewResponse(BaseModel):
-    findings: List[CodeReviewFinding] = Field(description="List of code review findings")
-    overall_quality: int = Field(description="Overall code quality score (1-10)")
-    summary: str = Field(description="Brief summary of the review")
+# Create parsers
+cr_parser = PydanticOutputParser(pydantic_object=CodeReview)
 
-# Define prompt templates for function calling
-documentation_review_prompt = PromptTemplate(
-    input_variables=["code"],
-    template="""Review the following code in terms of good documentation. Be concise and focus only on the most important aspects.
-Provide a list of documentation issues, specific suggestions for improvement, and an overall rating.
-
-Code:
-{code}
-"""
+# Define prompt templates with structured outputs
+cr_prompt = PromptTemplate(
+    input_variables=["code", "areas", "style"],
+    template=(
+        "Review the following code in terms of {areas}.\n"
+        "Writing Style: {style}\n"
+        "Format instruction: {format_instructions}\n"
+        "Code:\n{code}"
+    ),
+    partial_variables={"format_instructions": cr_parser.get_format_instructions()}
 )
-
-code_review_prompt = PromptTemplate(
-    input_variables=["code"],
-    template="""Review the following code for quality, best practices, and potential issues.
-Identify any problems, categorize them by type and severity, and provide suggestions for improvement.
-Include an overall quality score and a brief summary.
-
-Code:
-{code}
-"""
-)
-
-# Additional prompt templates can be added here as needed
