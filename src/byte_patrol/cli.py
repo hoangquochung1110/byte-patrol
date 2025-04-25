@@ -4,9 +4,12 @@ CLI entry point for byte-patrol.
 """
 import argparse
 from pathlib import Path
-from byte_patrol.config import get_llm, OPENROUTER_API_KEY, OPENROUTER_BASE_URL
-from byte_patrol.prompt_engine.prompt_templates import documentation_review_prompt
-from langchain.schema import HumanMessage
+
+
+from byte_patrol.config import OPENROUTER_API_KEY, OPENROUTER_BASE_URL, get_llm
+from byte_patrol.prompt_engine.prompt_templates import \
+    documentation_review_prompt
+
 
 def main():
     parser = argparse.ArgumentParser(
