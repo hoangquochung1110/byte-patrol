@@ -1,14 +1,12 @@
-from typing import List
-
-from langchain.output_parsers import PydanticOutputParser
 from langchain.prompts import PromptTemplate
+from langchain_core.output_parsers.pydantic import PydanticOutputParser
 from pydantic import BaseModel, Field
 
 
 # Define Pydantic models for structured outputs
 class CodeReview(BaseModel):
-    issues: List[str] = Field(description="Documentation issues identified in the code")
-    suggestions: List[str] = Field(description="Specific suggestions for improvement")
+    issues: list[str] = Field(description="Documentation issues identified in the code")
+    suggestions: list[str] = Field(description="Specific suggestions for improvement")
     rating: int = Field(description="Overall documentation quality rating (1-10)")
 
 
