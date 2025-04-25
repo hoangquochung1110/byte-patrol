@@ -1,5 +1,4 @@
 from langchain.prompts import PromptTemplate
-from langchain.output_parsers import PydanticOutputParser
 from pydantic import BaseModel, Field
 from typing import List, Optional
 
@@ -22,21 +21,26 @@ class CodeReviewResponse(BaseModel):
     overall_quality: int = Field(description="Overall code quality score (1-10)")
     summary: str = Field(description="Brief summary of the review")
 
-# Create parsers
-documentation_parser = PydanticOutputParser(pydantic_object=DocumentationReview)
-code_review_parser = PydanticOutputParser(pydantic_object=CodeReviewResponse)
-
-# Define prompt templates with structured outputs
+# Define prompt templates for function calling
 documentation_review_prompt = PromptTemplate(
     input_variables=["code"],
-    template="Review the following code in terms of good documentation. Be concise and focus only on the most important aspects.\n{format_instructions}\nCode:\n{code}",
-    partial_variables={"format_instructions": documentation_parser.get_format_instructions()}
+    template="""Review the following code in terms of good documentation. Be concise and focus only on the most important aspects.
+Provide a list of documentation issues, specific suggestions for improvement, and an overall rating.
+
+Code:
+{code}
+"""
 )
 
 code_review_prompt = PromptTemplate(
     input_variables=["code"],
-    template="Review the following code for quality, best practices, and potential issues.\n{format_instructions}\nCode:\n{code}",
-    partial_variables={"format_instructions": code_review_parser.get_format_instructions()}
+    template="""Review the following code for quality, best practices, and potential issues.
+Identify any problems, categorize them by type and severity, and provide suggestions for improvement.
+Include an overall quality score and a brief summary.
+
+Code:
+{code}
+"""
 )
 
 # Additional prompt templates can be added here as needed
