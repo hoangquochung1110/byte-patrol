@@ -8,13 +8,15 @@ dependencies = [
     "click>=8.1.8",
     "langchain-openai>=0.3.14",
     "langchain>=0.3.24",
-    "pytest>=8.3.5",
     "python-dotenv>=1.1.0",
     "click>=8.1.7",
+    "pre-commit>=4.2.0",
+    "pydantic>=2.11.3",
 ]
 
 [project.scripts]
 "bp" = "byte_patrol.cli:main"
+"byte-patrol-hook" = "byte_patrol.pre_commit_hook:main"
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
@@ -23,3 +25,9 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["byte_patrol*"]
+
+[tool.uv]
+dev-dependencies = [
+    "ipdb>=0.13.13",
+    "pytest>=8.3.5",
+]

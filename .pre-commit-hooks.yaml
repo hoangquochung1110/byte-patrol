@@ -1,0 +1,14 @@
+-   id: byte-patrol
+    name: Byte Patrol
+    description: AI-powered code review
+    entry: byte-patrol-hook
+    language: python
+    types: [python]
+    require_serial: true
+    args: []  # Default empty args list
+    # Available arguments that can be passed in user config:
+    # --areas: Code review areas (can be repeated)
+    # --style: Review style
+    # --timeout: Request timeout
+    # --max-tokens: Maximum tokens in response
+    # --severity-threshold: Minimum severity to fail (1-10)
