@@ -234,8 +234,6 @@ class GitHubService:
                     f["filename"],
                     areas_arg,
                     style_arg,
-                    json_flag,
-                    severity_threshold,
                 )
                 sections.append(f"### {f['filename']}\n\n{result}")
             full_body = "## Byte Patrol Code Review\n\n" + "\n\n".join(sections)
