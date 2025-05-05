@@ -12,6 +12,8 @@ dependencies = [
     "click>=8.1.7",
     "pre-commit>=4.2.0",
     "pydantic>=2.11.3",
+    "fastapi>=0.115.12",
+    "uvicorn>=0.34.2",
 ]
 
 [project.scripts]
