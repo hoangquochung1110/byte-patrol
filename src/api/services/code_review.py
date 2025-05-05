@@ -1,7 +1,5 @@
 # Integration with byte_patrol core
-from fastapi import Depends
 import logging
-from typing import Dict, Any, List
 
 from byte_patrol.prompt_engine.prompt_templates import (
     CodeReview,
@@ -10,21 +8,28 @@ from byte_patrol.prompt_engine.prompt_templates import (
     code_suggestion_prompt
 )
 from byte_patrol.config import get_llm
-from api.config import get_settings, Settings
+
 
 logger = logging.getLogger("byte-patrol.code_review")
 
 class CodeReviewService:
-    def __init__(self, settings: Settings = Depends(get_settings)):
-        self.settings = settings
-        
-    async def review_code(self, content: str, filename: str) -> str:
+    def __init__(self):
+        pass
+
+    async def review_code(
+        self,
+        content,
+        filename,
+        areas,
+        style,
+    ) -> str:
         """
         Review code using the byte-patrol core logic.
         
         Args:
             content: The file content to review
             filename: The name of the file
+            areas: Optional list of areas to review; if None, default areas based on file type
             
         Returns:
             Formatted review results as markdown
@@ -38,18 +43,19 @@ class CodeReviewService:
                 max_tokens=1000
             )
             
-            # Determine review areas based on file type
-            areas = self._get_review_areas(filename)
+            # Determine review areas: use provided or default based on file type
+            areas_to_use = areas if areas is not None else self._get_review_areas(filename)
             
             # Structure review style
-            style = "Focus on actionable suggestions and provide examples where appropriate."
-            
+            if style is None:
+                style = "Focus on actionable suggestions."
+
             # Setup structured output capabilities
             review_llm = llm.with_structured_output(CodeReview)
             suggestion_llm = llm.with_structured_output(CodeSuggestion)
             
             # Run the LLM pipeline with structured outputs
-            areas_str = ", ".join(areas)
+            areas_str = ", ".join(areas_to_use)
             review_result = (code_review_prompt | review_llm).invoke(
                 {"code": content, "areas": areas_str, "style": style}
             )
@@ -69,7 +75,7 @@ class CodeReviewService:
             logger.exception(f"Error reviewing code: {str(e)}")
             return f"⚠️ Error during code review: {str(e)}"
     
-    def _get_review_areas(self, filename: str) -> List[str]:
+    def _get_review_areas(self, filename: str) -> list[str]:
         """Determine review areas based on file type"""
         # Default review areas
         areas = ["code quality", "best practices"]

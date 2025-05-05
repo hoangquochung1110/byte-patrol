@@ -6,6 +6,7 @@ import jwt
 import time
 import httpx
 from typing import Optional, Dict, Any, List, Tuple
+import shlex
 
 from api.models import IssueCommentEvent, PullRequestEvent
 from api.services.code_review import CodeReviewService
@@ -66,22 +67,37 @@ class GitHubService:
     
     def parse_review_command(self, comment: str) -> Optional[Dict[str, Any]]:
         """Parse review command from comment text"""
-        # Match pattern: @byte-patrol review [file1.py] [file2.py]
-        pattern = r"@byte-patrol\s+review(?:\s+([^\s]+))?"
-        match = re.search(pattern, comment, re.IGNORECASE)
-        
-        if not match:
+        # Tokenize comment and locate 'review' command
+        tokens = shlex.split(comment)
+        try:
+            idx = tokens.index("review")
+        except ValueError:
             return None
-            
-        # Extract files to review (if specified)
-        files_str = match.group(1)
-        files = []
-        if files_str:
-            files = re.findall(r"[\w./\-]+\.\w+", files_str)
-            
+        args = tokens[idx+1:]
+        files: List[str] = []
+        areas: List[str] = []
+        style: Optional[str] = None
+        i = 0
+        while i < len(args):
+            arg = args[i]
+            if arg in ("-a", "--areas", "-areas"):
+                if i + 1 < len(args):
+                    areas.append(args[i+1])
+                    i += 2
+                    continue
+            elif arg in ("-s", "--style"):
+                if i + 1 < len(args):
+                    style = args[i+1]
+                    i += 2
+                    continue
+            elif re.match(r"[\w./\-]+\.[A-Za-z0-9]+", arg):
+                files.append(arg)
+            i += 1
         return {
             "type": "review",
-            "files": files or []  # Empty list means review all files
+            "files": files,
+            "areas": areas,
+            "style": style,
         }
     
     def should_auto_review(self, repo_full_name: str) -> bool:
@@ -133,9 +149,8 @@ class GitHubService:
         repo: str, 
         pr_number: int, 
         comment: str
-    ) -> None:
+    ) -> int:
         """Post a comment on a pull request"""
-        import ipdb; ipdb.set_trace()
         payload = {"body": comment}
         response = await client.post(
             f"/repos/{repo}/issues/{pr_number}/comments",
@@ -144,6 +159,27 @@ class GitHubService:
         
         if response.status_code != 201:
             logger.error(f"Failed to post comment: {response.text}")
+            raise Exception(f"GitHub API error: {response.status_code}")
+        
+        data = response.json()
+        return data
+    
+    async def edit_review_comment(
+        self,
+        client: httpx.AsyncClient,
+        repo: str,
+        comment_id: int,
+        new_comment: str
+    ) -> None:
+        """Edit an existing PR review comment"""
+        payload = {"body": new_comment}
+        response = await client.patch(
+            f"/repos/{repo}/issues/comments/{comment_id}",
+            json=payload
+        )
+
+        if response.status_code != 200:
+            logger.error(f"Failed to edit comment {comment_id}: {response.text}")
             raise Exception(f"GitHub API error: {response.status_code}")
     
     async def process_review_command(
@@ -154,72 +190,59 @@ class GitHubService:
     ) -> None:
         """Process a review command from a comment"""
         try:
-            # Initialize GitHub client
             client = await self.get_client(event.installation.id)
-            
-            # Get PR details
             repo = event.repository.full_name
             pr_number = event.issue.number
-            
-            # Post initial comment to acknowledge
-            await self.post_review_comment(
-                client,
-                repo,
-                pr_number,
-                "🔍 Byte Patrol is reviewing your code. Please wait..."
+
+            # Fetch existing bot comment for create-or-update
+            comments_resp = await client.get(f"/repos/{repo}/issues/{pr_number}/comments")
+            if comments_resp.status_code != 200:
+                logger.error(f"Failed to list comments: {comments_resp.text}")
+                raise Exception(f"GitHub API error: {comments_resp.status_code}")
+            existing_comments = comments_resp.json()
+            existing_bot = next(
+                (c for c in existing_comments if c["body"].startswith("## Byte Patrol Code Review")),
+                None
             )
-            
+
             # Get PR files
             files = await self.get_pull_request_files(client, repo, pr_number)
-            
-            # Filter files based on command
             if command["files"]:
                 files = [f for f in files if f["filename"] in command["files"]]
-            
             if not files:
-                await self.post_review_comment(
-                    client,
-                    repo,
-                    pr_number,
-                    "❌ No matching files found to review."
-                )
+                body = "❌ No matching files found to review."
+                if existing_bot:
+                    await self.edit_review_comment(client, repo, existing_bot["id"], body)
+                else:
+                    await self.post_review_comment(client, repo, pr_number, body)
                 return
-            
-            # Review each file
-            for file in files:
-                # Skip deleted files
-                if file["status"] == "removed":
+
+            # Prepare review parameters
+            areas_arg = command.get("areas") or None
+            style_arg = command.get("style")
+            json_flag = False
+            severity_threshold = 0
+
+            # Aggregate reviews and post/update a single comment
+            sections = []
+            for f in files:
+                if f["status"] == "removed":
                     continue
-                    
-                # Get file content
-                content = await self.get_file_content(
-                    client,
-                    repo,
-                    file["filename"],
-                    event.repository.default_branch
-                )
-                
-                # Perform review
-                review_result = await code_review_service.review_code(
+                content = await self.get_file_content(client, repo, f["filename"], event.repository.default_branch)
+                result = await code_review_service.review_code(
                     content,
-                    file["filename"]
+                    f["filename"],
+                    areas_arg,
+                    style_arg,
+                    json_flag,
+                    severity_threshold,
                 )
-                import ipdb; ipdb.set_trace()
-                # Post review as comment
-                await self.post_review_comment(
-                    client,
-                    repo,
-                    pr_number,
-                    f"## Code Review: {file['filename']}\n\n{review_result}"
-                )
-            
-            # Post summary
-            await self.post_review_comment(
-                client,
-                repo,
-                pr_number,
-                f"✅ Code review completed for {len(files)} files."
-            )
+                sections.append(f"### {f['filename']}\n\n{result}")
+            full_body = "## Byte Patrol Code Review\n\n" + "\n\n".join(sections)
+            if existing_bot:
+                await self.edit_review_comment(client, repo, existing_bot["id"], full_body)
+            else:
+                await self.post_review_comment(client, repo, pr_number, full_body)
             
         except Exception as e:
             logger.exception(f"Error processing review command: {str(e)}")
