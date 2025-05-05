@@ -52,7 +52,7 @@ async def github_webhook(
     if not verify_signature(body, x_hub_signature_256, settings.github_webhook_secret):
         logger.warning("Invalid webhook signature")
         raise HTTPException(status_code=401, detail="Invalid signature")
-    breakpoint()
+
     # Parse webhook payload
     try:
         payload = json.loads(body)

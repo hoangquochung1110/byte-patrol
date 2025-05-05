@@ -28,7 +28,7 @@ class GitHubService:
         }
         
         # Create JWT
-        private_key = self.settings.github_app_private_key.replace("\\n", "\n")
+        private_key = self.settings.github_private_key.replace("\\n", "\n")
         jwt_token = jwt.encode(payload, private_key, algorithm="RS256")
         
         # Exchange JWT for installation token
@@ -135,6 +135,7 @@ class GitHubService:
         comment: str
     ) -> None:
         """Post a comment on a pull request"""
+        import ipdb; ipdb.set_trace()
         payload = {"body": comment}
         response = await client.post(
             f"/repos/{repo}/issues/{pr_number}/comments",
@@ -203,7 +204,7 @@ class GitHubService:
                     content,
                     file["filename"]
                 )
-                
+                import ipdb; ipdb.set_trace()
                 # Post review as comment
                 await self.post_review_comment(
                     client,
