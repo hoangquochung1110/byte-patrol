@@ -40,7 +40,7 @@ class CodeReviewService:
             # Get configured LLM
             llm = get_llm(
                 request_timeout=30,
-                max_tokens=1000
+                max_tokens=2000
             )
             
             # Determine review areas: use provided or default based on file type
