@@ -17,7 +17,7 @@ from byte_patrol.prompt_engine.prompt_templates import (CodeReview,
 @click.command(help="Review code documentation via an LLM")
 @click.argument('file', type=click.Path(exists=True, path_type=Path))
 @click.option('-t', '--timeout', type=float, default=30, help="LLM request timeout in seconds")
-@click.option('-m', '--max-tokens', type=int, default=200, help="Maximum number of tokens in the response")
+@click.option('-m', '--max-tokens', type=int, default=2000, help="Maximum number of tokens in the response")
 @click.option('-a', '--areas', type=str, default=["documentation"], multiple=True, help="Areas to review (can be specified multiple times)")
 @click.option('-s', '--style', type=str, default="Be concise and focus only on the most important aspects.", 
               help="Customize the style of the response (e.g., 'Be very detailed', 'Keep it brief', etc.)")
@@ -38,11 +38,6 @@ def main(
     if not OPENROUTER_API_KEY or not OPENROUTER_BASE_URL:
         click.echo("OPENROUTER_API_KEY and OPENROUTER_BASE_URL must be set in environment.", err=True)
         return 1
-        
-    # Skip non-Python files if python_only is set
-    if python_only and file.suffix != '.py':
-        click.echo(f"Skipping non-Python file: {file}")
-        return 0
 
     code = file.read_text()
     llm = get_llm(request_timeout=timeout, max_tokens=max_tokens)
