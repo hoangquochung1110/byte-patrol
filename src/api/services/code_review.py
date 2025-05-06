@@ -1,5 +1,6 @@
 # Integration with byte_patrol core
 import logging
+from pathlib import Path
 
 from byte_patrol.prompt_engine.prompt_templates import (
     CodeReview,
@@ -22,8 +23,8 @@ class CodeReviewService:
 
     def can_review_file(self, filename: str) -> bool:
         """Check if a file can be reviewed based on its extension"""
-        ext = filename.split(".")[-1].lower()
-        return ext in self.allowed_file_types
+       ext = Path(filename).suffix.lstrip('.').lower()
+       return ext in self.allowed_file_types
 
     async def review_code(
         self,
