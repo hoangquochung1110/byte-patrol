@@ -3,7 +3,7 @@ import logging
 import re
 import shlex
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TypeVar, Generic
 from argparse import ArgumentParser
 
 import httpx
@@ -18,11 +18,53 @@ from api.constants import DEFAULT_FILE_TYPES, DEFAULT_JWT_EXPIRY_SEC
 
 logger = logging.getLogger("byte-patrol.github")
 
+T = TypeVar('T')
+
 class GitHubService:
     def __init__(self, settings: Settings = Depends(get_settings)):
         self.settings = settings
         self.base_url = settings.github_api_url
         
+    async def _request_json(
+        self,
+        client: httpx.AsyncClient,
+        method: str,
+        path: str,
+        expected_status: int = 200,
+        **kwargs
+    ) -> Any:
+        """Make an HTTP request and handle JSON response.
+        
+        Args:
+            client: The httpx client to use
+            method: HTTP method (GET, POST, etc.)
+            path: API endpoint path
+            expected_status: Expected HTTP status code (default: 200)
+            **kwargs: Additional arguments to pass to client.request
+            
+        Returns:
+            Parsed JSON response
+            
+        Raises:
+            Exception: If request fails or returns unexpected status
+        """
+        try:
+            response = await client.request(method, path, **kwargs)
+            response.raise_for_status()
+            if response.status_code != expected_status:
+                raise httpx.HTTPStatusError(
+                    f"Expected status {expected_status}, got {response.status_code}",
+                    request=response.request,
+                    response=response
+                )
+            return response.json()
+        except httpx.HTTPStatusError as e:
+            logger.error(f"GitHub API {method} {path} failed: {e.response.text}")
+            raise Exception(f"GitHub API error: {e.response.status_code}") from e
+        except httpx.RequestError as e:
+            logger.error(f"Request failed for {method} {path}: {str(e)}")
+            raise Exception("Failed to connect to GitHub API") from e
+
     async def get_installation_token(self, installation_id: int) -> str:
         """Generate a JWT and exchange it for an installation token"""
         now = int(time.time())
@@ -43,20 +85,14 @@ class GitHubService:
                 "Accept": "application/vnd.github.v3+json"
             }
             
-            try:
-                response = await client.post(
-                    f"{self.base_url}/app/installations/{installation_id}/access_tokens",
-                    headers=headers
-                )
-                response.raise_for_status()
-                data = response.json()
-                return data["token"]
-            except httpx.HTTPStatusError as e:
-                logger.error(f"Failed to get installation token: {e.response.text}")
-                raise Exception(f"GitHub API error: {e.response.status_code}") from e
-            except httpx.RequestError as e:
-                logger.error(f"Request failed while getting installation token: {str(e)}")
-                raise Exception("Failed to connect to GitHub API") from e
+            data = await self._request_json(
+                client,
+                "POST",
+                f"{self.base_url}/app/installations/{installation_id}/access_tokens",
+                expected_status=201,
+                headers=headers
+            )
+            return data["token"]
     
     async def get_client(self, installation_id: int) -> httpx.AsyncClient:
         """Get an authenticated client for GitHub API requests"""
@@ -181,16 +217,11 @@ class GitHubService:
         pr_number: int
     ) -> List[Dict[str, Any]]:
         """Get files modified in a pull request"""
-        try:
-            response = await client.get(f"/repos/{repo}/pulls/{pr_number}/files")
-            response.raise_for_status()
-            return response.json()
-        except httpx.HTTPStatusError as e:
-            logger.error(f"Failed to get PR files: {e.response.text}")
-            raise Exception(f"GitHub API error: {e.response.status_code}") from e
-        except httpx.RequestError as e:
-            logger.error(f"Request failed while getting PR files: {str(e)}")
-            raise Exception("Failed to connect to GitHub API") from e
+        return await self._request_json(
+            client,
+            "GET",
+            f"/repos/{repo}/pulls/{pr_number}/files"
+        )
     
     async def get_file_content(
         self, 
@@ -200,21 +231,14 @@ class GitHubService:
         ref: str
     ) -> str:
         """Get content of a file from GitHub"""
-        try:
-            response = await client.get(
-                f"/repos/{repo}/contents/{file_path}",
-                params={"ref": ref}
-            )
-            response.raise_for_status()
-            data = response.json()
-            import base64
-            return base64.b64decode(data["content"]).decode("utf-8")
-        except httpx.HTTPStatusError as e:
-            logger.error(f"Failed to get file content: {e.response.text}")
-            raise Exception(f"GitHub API error: {e.response.status_code}") from e
-        except httpx.RequestError as e:
-            logger.error(f"Request failed while getting file content: {str(e)}")
-            raise Exception("Failed to connect to GitHub API") from e
+        data = await self._request_json(
+            client,
+            "GET",
+            f"/repos/{repo}/contents/{file_path}",
+            params={"ref": ref}
+        )
+        import base64
+        return base64.b64decode(data["content"]).decode("utf-8")
     
     async def post_review_comment(
         self, 
@@ -224,20 +248,14 @@ class GitHubService:
         comment: str
     ) -> int:
         """Post a comment on a pull request"""
-        try:
-            payload = {"body": comment}
-            response = await client.post(
-                f"/repos/{repo}/issues/{pr_number}/comments",
-                json=payload
-            )
-            response.raise_for_status()
-            return response.json()
-        except httpx.HTTPStatusError as e:
-            logger.error(f"Failed to post comment: {e.response.text}")
-            raise Exception(f"GitHub API error: {e.response.status_code}") from e
-        except httpx.RequestError as e:
-            logger.error(f"Request failed while posting comment: {str(e)}")
-            raise Exception("Failed to connect to GitHub API") from e
+        payload = {"body": comment}
+        return await self._request_json(
+            client,
+            "POST",
+            f"/repos/{repo}/issues/{pr_number}/comments",
+            expected_status=201,
+            json=payload
+        )
     
     async def edit_review_comment(
         self,
@@ -247,19 +265,13 @@ class GitHubService:
         new_comment: str
     ) -> None:
         """Edit an existing PR review comment"""
-        try:
-            payload = {"body": new_comment}
-            response = await client.patch(
-                f"/repos/{repo}/issues/comments/{comment_id}",
-                json=payload
-            )
-            response.raise_for_status()
-        except httpx.HTTPStatusError as e:
-            logger.error(f"Failed to edit comment {comment_id}: {e.response.text}")
-            raise Exception(f"GitHub API error: {e.response.status_code}") from e
-        except httpx.RequestError as e:
-            logger.error(f"Request failed while editing comment: {str(e)}")
-            raise Exception("Failed to connect to GitHub API") from e
+        payload = {"body": new_comment}
+        await self._request_json(
+            client,
+            "PATCH",
+            f"/repos/{repo}/issues/comments/{comment_id}",
+            json=payload
+        )
     
     async def process_review_command(
         self,
@@ -281,19 +293,18 @@ class GitHubService:
 
             # Fetch existing bot comment for create-or-update
             try:
-                comments_resp = await client.get(f"/repos/{repo}/issues/{pr_number}/comments")
-                comments_resp.raise_for_status()
-                existing_comments = comments_resp.json()
+                comments = await self._request_json(
+                    client,
+                    "GET",
+                    f"/repos/{repo}/issues/{pr_number}/comments"
+                )
                 existing_bot = next(
-                    (c for c in existing_comments if c["body"].startswith("## Byte Patrol Code Review")),
+                    (c for c in comments if c["body"].startswith("## Byte Patrol Code Review")),
                     None
                 )
-            except httpx.HTTPStatusError as e:
-                logger.error(f"Failed to list comments: {e.response.text}")
-                raise Exception(f"GitHub API error: {e.response.status_code}") from e
-            except httpx.RequestError as e:
-                logger.error(f"Request failed while listing comments: {str(e)}")
-                raise Exception("Failed to connect to GitHub API") from e
+            except Exception as e:
+                logger.error(f"Failed to list comments: {str(e)}")
+                raise
 
             # Get PR files
             files = await self.get_pull_request_files(client, repo, pr_number)
@@ -309,16 +320,16 @@ class GitHubService:
 
             # Fetch PR metadata once
             try:
-                pr_resp = await client.get(f"/repos/{repo}/pulls/{pr_number}")
-                pr_resp.raise_for_status()
-                pr = PullRequest(**pr_resp.json())
+                pr_data = await self._request_json(
+                    client,
+                    "GET",
+                    f"/repos/{repo}/pulls/{pr_number}"
+                )
+                pr = PullRequest(**pr_data)
                 ref = pr.head.ref
-            except httpx.HTTPStatusError as e:
-                logger.error(f"Failed to get PR metadata: {e.response.text}")
-                raise Exception(f"GitHub API error: {e.response.status_code}") from e
-            except httpx.RequestError as e:
-                logger.error(f"Request failed while getting PR metadata: {str(e)}")
-                raise Exception("Failed to connect to GitHub API") from e
+            except Exception as e:
+                logger.error(f"Failed to get PR metadata: {str(e)}")
+                raise
 
             # Prepare review parameters
             areas_arg = command.get("areas") or None
