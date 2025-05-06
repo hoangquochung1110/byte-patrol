@@ -14,11 +14,9 @@ from pathlib import Path
 from api.config import Settings, get_settings
 from api.models import IssueCommentEvent, PullRequest, PullRequestEvent
 from api.services.code_review import CodeReviewService
+from api.constants import DEFAULT_FILE_TYPES, DEFAULT_JWT_EXPIRY_SEC
 
 logger = logging.getLogger("byte-patrol.github")
-
-# how long our JWT should live, in seconds
-DEFAULT_JWT_EXPIRY_SEC = 10 * 60
 
 class GitHubService:
     def __init__(self, settings: Settings = Depends(get_settings)):
@@ -110,7 +108,7 @@ class GitHubService:
             "-t", "--type", "--file-type",
             dest="file_types",
             type=lambda s: s.split(","),
-            default=["py"],
+            default=list(DEFAULT_FILE_TYPES),
             help="Comma-separated file extensions to review"
         )
         # Any remaining args are treated as filenames
@@ -245,7 +243,7 @@ class GitHubService:
             pr_number = event.issue.number
 
             # Set allowed file types for review
-            file_types = command.get("file_types", ["py"])
+            file_types = command.get("file_types", list(DEFAULT_FILE_TYPES))
             code_review_service.set_allowed_file_types(file_types)
 
             # Fetch existing bot comment for create-or-update

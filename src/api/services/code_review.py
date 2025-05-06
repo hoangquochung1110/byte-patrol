@@ -9,13 +9,10 @@ from byte_patrol.prompt_engine.prompt_templates import (
     code_suggestion_prompt
 )
 from byte_patrol.config import get_llm
+from api.constants import DEFAULT_FILE_TYPES, DEFAULT_REVIEW_STYLE
 
 
 logger = logging.getLogger("byte-patrol.code_review")
-
-
-DEFAULT_REVIEW_STYLE = "Concise"
-DEFAULT_FILE_TYPES = ("py",)
 
 
 class CodeReviewService:
