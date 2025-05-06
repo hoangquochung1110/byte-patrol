@@ -203,6 +203,7 @@ class GitHubService:
     ) -> None:
         """Process a review command from a comment"""
         try:
+            # Create single client for all operations
             client = await self.get_client(event.installation.id)
             repo = event.repository.full_name
             pr_number = event.issue.number
@@ -234,6 +235,14 @@ class GitHubService:
                     await self.post_review_comment(client, repo, pr_number, body)
                 return
 
+            # Fetch PR metadata once
+            pr_resp = await client.get(f"/repos/{repo}/pulls/{pr_number}")
+            if pr_resp.status_code != 200:
+                logger.error(f"Failed to get PR metadata: {pr_resp.text}")
+                raise Exception(f"GitHub API error: {pr_resp.status_code}")
+            pr = PullRequest(**pr_resp.json())
+            ref = pr.head.ref
+
             # Prepare review parameters
             areas_arg = command.get("areas") or None
             style_arg = command.get("style")
@@ -247,12 +256,7 @@ class GitHubService:
                 if f["status"] == "removed":
                     continue
                 try:
-
-                    client = await self.get_client(event.installation.id)
-                    pr_data = await client.get(f"/repos/{repo}/pulls/{pr_number}")
-                    # To retrieve the feature branch
-                    pr = PullRequest(**pr_data.json())
-                    content = await self.get_file_content(client, repo, f["filename"], pr.head.ref)
+                    content = await self.get_file_content(client, repo, f["filename"], ref)
                 except Exception as e:
                     logger.error(f"Failed to get file content: {str(e)}")
                     continue
