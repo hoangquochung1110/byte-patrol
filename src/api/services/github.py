@@ -1,16 +1,17 @@
 # GitHub API interactions
-from fastapi import Depends
 import logging
 import re
-import jwt
-import time
-import httpx
-from typing import Optional, Dict, Any, List, Tuple
 import shlex
+import time
+from typing import Any, Dict, List, Optional
 
-from api.models import IssueCommentEvent, PullRequestEvent
+import httpx
+import jwt
+from fastapi import Depends
+
+from api.config import Settings, get_settings
+from api.models import IssueCommentEvent, PullRequest, PullRequestEvent
 from api.services.code_review import CodeReviewService
-from api.config import get_settings, Settings
 
 logger = logging.getLogger("byte-patrol.github")
 
@@ -72,12 +73,13 @@ class GitHubService:
         try:
             idx = tokens.index("review")
         except ValueError:
-            logger.error("No review command found from comment: %s", comment)
+            logger.error("No review command found from comment: %s ...", comment[:20])
             return None
         args = tokens[idx+1:]
         files: List[str] = []
         areas: List[str] = []
         style: Optional[str] = None
+        file_types: List[str] = ["py"]  # Default to Python files only
         i = 0
         while i < len(args):
             arg = args[i]
@@ -91,6 +93,11 @@ class GitHubService:
                     style = args[i+1]
                     i += 2
                     continue
+            elif arg in ("-t", "--type", "--file-type"):
+                if i + 1 < len(args):
+                    file_types = args[i+1].split(",")
+                    i += 2
+                    continue
             elif re.match(r"[\w./\-]+\.[A-Za-z0-9]+", arg):
                 files.append(arg)
             i += 1
@@ -99,6 +106,7 @@ class GitHubService:
             "files": files,
             "areas": areas,
             "style": style,
+            "file_types": file_types,
         }
     
     def should_auto_review(self, repo_full_name: str) -> bool:
@@ -195,6 +203,10 @@ class GitHubService:
             repo = event.repository.full_name
             pr_number = event.issue.number
 
+            # Set allowed file types for review
+            file_types = command.get("file_types", ["py"])
+            code_review_service.set_allowed_file_types(file_types)
+
             # Fetch existing bot comment for create-or-update
             comments_resp = await client.get(f"/repos/{repo}/issues/{pr_number}/comments")
             if comments_resp.status_code != 200:
@@ -221,23 +233,47 @@ class GitHubService:
             # Prepare review parameters
             areas_arg = command.get("areas") or None
             style_arg = command.get("style")
-            json_flag = False
-            severity_threshold = 0
 
             # Aggregate reviews and post/update a single comment
             sections = []
+            reviewed_count = 0
+            skipped_count = 0
+
             for f in files:
                 if f["status"] == "removed":
                     continue
-                content = await self.get_file_content(client, repo, f["filename"], event.repository.default_branch)
-                result = await code_review_service.review_code(
-                    content,
-                    f["filename"],
-                    areas_arg,
-                    style_arg,
-                )
-                sections.append(f"### {f['filename']}\n\n{result}")
-            full_body = "## Byte Patrol Code Review\n\n" + "\n\n".join(sections)
+                try:
+
+                    client = await self.get_client(event.installation.id)
+                    pr_data = await client.get(f"/repos/{repo}/pulls/{pr_number}")
+                    # To retrieve the feature branch
+                    pr = PullRequest(**pr_data.json())
+                    content = await self.get_file_content(client, repo, f["filename"], pr.head.ref)
+                except Exception as e:
+                    logger.error(f"Failed to get file content: {str(e)}")
+                    continue
+                else:
+                    result = await code_review_service.review_code(
+                        content,
+                        f["filename"],
+                        areas_arg,
+                        style_arg,
+                    )
+                    if "Skipping review: File type not supported" in result:
+                        skipped_count += 1
+                    else:
+                        reviewed_count += 1
+                        sections.append(f"### {f['filename']}\n\n{result}")
+
+            # Create summary header
+            summary = [
+                "## Byte Patrol Code Review\n",
+                f"Reviewing files with types: {', '.join(file_types)}\n",
+                f"Files reviewed: {reviewed_count}\n",
+                f"Files skipped: {skipped_count}\n\n"
+            ]
+
+            full_body = "".join(summary) + "\n\n".join(sections)
             if existing_bot:
                 await self.edit_review_comment(client, repo, existing_bot["id"], full_body)
             else:

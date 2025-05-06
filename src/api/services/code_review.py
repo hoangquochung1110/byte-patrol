@@ -14,7 +14,16 @@ logger = logging.getLogger("byte-patrol.code_review")
 
 class CodeReviewService:
     def __init__(self):
-        pass
+        self.allowed_file_types = ["py"]  # Default to Python files only
+
+    def set_allowed_file_types(self, file_types: list[str]):
+        """Set the allowed file types for review"""
+        self.allowed_file_types = [ft.lstrip('.') for ft in file_types]
+
+    def can_review_file(self, filename: str) -> bool:
+        """Check if a file can be reviewed based on its extension"""
+        ext = filename.split(".")[-1].lower()
+        return ext in self.allowed_file_types
 
     async def review_code(
         self,
@@ -30,17 +39,21 @@ class CodeReviewService:
             content: The file content to review
             filename: The name of the file
             areas: Optional list of areas to review; if None, default areas based on file type
+            style: Optional style guidance for the review
             
         Returns:
             Formatted review results as markdown
         """
         try:
+            if not self.can_review_file(filename):
+                return f"⚠️ Skipping review: File type not supported for {filename}"
+
             logger.info(f"Reviewing file: {filename}")
             
             # Get configured LLM
             llm = get_llm(
                 request_timeout=30,
-                max_tokens=2000
+                max_tokens=5000
             )
             
             # Determine review areas: use provided or default based on file type
@@ -48,7 +61,7 @@ class CodeReviewService:
             
             # Structure review style
             if style is None:
-                style = "Focus on actionable suggestions."
+                style = "Concise"
 
             # Setup structured output capabilities
             review_llm = llm.with_structured_output(CodeReview)
@@ -56,20 +69,23 @@ class CodeReviewService:
             
             # Run the LLM pipeline with structured outputs
             areas_str = ", ".join(areas_to_use)
-            review_result = (code_review_prompt | review_llm).invoke(
-                {"code": content, "areas": areas_str, "style": style}
-            )
-            
-            suggestion_result = (code_suggestion_prompt | suggestion_llm).invoke(
-                {"code_review": review_result.model_dump_json()}
-            )
-            
-            # Format the results as markdown
-            return self._format_review_results(
-                review_result, 
-                suggestion_result, 
-                filename
-            )
+            try:
+                review_result = (code_review_prompt | review_llm).invoke(
+                    {"code": content, "areas": areas_str, "style": style}
+                )
+            except TypeError as e:
+                logger.error(f"Failed to review code: {str(e)}")
+                return f"⚠️ Error during code review: {str(e)}"
+            else:
+                suggestion_result = (code_suggestion_prompt | suggestion_llm).invoke(
+                    {"code_review": review_result.model_dump_json()}
+                )
+                # Format the results as markdown
+                return self._format_review_results(
+                    review_result, 
+                    suggestion_result, 
+                    filename
+                )
             
         except Exception as e:
             logger.exception(f"Error reviewing code: {str(e)}")
@@ -78,18 +94,7 @@ class CodeReviewService:
     def _get_review_areas(self, filename: str) -> list[str]:
         """Determine review areas based on file type"""
         # Default review areas
-        areas = ["code quality", "best practices"]
-        
-        # Add specific areas based on file extension
-        ext = filename.split(".")[-1].lower()
-        
-        if ext == "py":
-            areas.extend(["python", "documentation", "variable naming"])
-        elif ext in ["js", "ts"]:
-            areas.extend(["javascript", "typescript"])
-        elif ext in ["html", "css"]:
-            areas.extend(["web", "ui"])
-        
+        areas = ["code quality"]        
         return areas
     
     def _format_review_results(
