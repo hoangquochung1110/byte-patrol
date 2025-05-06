@@ -5,6 +5,7 @@ import shlex
 import time
 from typing import Any, Dict, List, Optional, TypeVar, Generic
 from argparse import ArgumentParser
+import argparse
 
 import httpx
 import jwt
@@ -20,36 +21,24 @@ logger = logging.getLogger("byte-patrol.github")
 
 T = TypeVar('T')
 
-class GitHubService:
+
+class GitHubClient:
     def __init__(self, settings: Settings = Depends(get_settings)):
         self.settings = settings
-        self.base_url = settings.github_api_url
-        
+        self.client = None
+
     async def _request_json(
         self,
-        client: httpx.AsyncClient,
         method: str,
         path: str,
         expected_status: int = 200,
         **kwargs
     ) -> Any:
-        """Make an HTTP request and handle JSON response.
-        
-        Args:
-            client: The httpx client to use
-            method: HTTP method (GET, POST, etc.)
-            path: API endpoint path
-            expected_status: Expected HTTP status code (default: 200)
-            **kwargs: Additional arguments to pass to client.request
-            
-        Returns:
-            Parsed JSON response
-            
-        Raises:
-            Exception: If request fails or returns unexpected status
-        """
+        """Make an HTTP request and handle JSON response."""
+        if self.client is None:
+            raise RuntimeError("GitHubClient not initialized. Call 'initialize' first.")
         try:
-            response = await client.request(method, path, **kwargs)
+            response = await self.client.request(method, path, **kwargs)
             response.raise_for_status()
             if response.status_code != expected_status:
                 raise httpx.HTTPStatusError(
@@ -84,22 +73,32 @@ class GitHubService:
                 "Authorization": f"Bearer {jwt_token}",
                 "Accept": "application/vnd.github.v3+json"
             }
-            
-            data = await self._request_json(
-                client,
-                "POST",
-                f"{self.base_url}/app/installations/{installation_id}/access_tokens",
-                expected_status=201,
-                headers=headers
-            )
-            return data["token"]
-    
-    async def get_client(self, installation_id: int) -> httpx.AsyncClient:
-        """Get an authenticated client for GitHub API requests"""
+            try:
+                response = await client.request(
+                    "POST",
+                    f"{self.settings.github_api_url}/app/installations/{installation_id}/access_tokens",
+                    headers=headers
+                )
+                if response.status_code != 201:
+                    logger.error(
+                        f"Failed to get installation token: {response.status_code} {response.text}"
+                    )
+                    raise Exception(
+                        f"Failed to get installation token: {response.status_code} {response.text}"
+                    )
+                data = response.json()
+                if "token" not in data:
+                    logger.error(f"Installation token missing in response: {data}")
+                    raise Exception("Installation token missing in response")
+                return data["token"]
+            except httpx.RequestError as e:
+                logger.error(f"Request failed for installation token: {str(e)}")
+                raise Exception("Failed to connect to GitHub API for installation token") from e
+
+    async def initialize(self, installation_id: int):
         token = await self.get_installation_token(installation_id)
-        
-        return httpx.AsyncClient(
-            base_url=self.base_url,
+        self.client = httpx.AsyncClient(
+            base_url=self.settings.github_api_url,
             headers={
                 "Authorization": f"token {token}",
                 "Accept": "application/vnd.github.v3+json",
@@ -107,7 +106,23 @@ class GitHubService:
             },
             timeout=30.0
         )
-    
+        return self
+
+    async def close(self) -> None:
+        if self.client is not None:
+            await self.client.aclose()
+
+
+class GitHubService:
+    def __init__(self, settings: Settings = Depends(get_settings)):
+        self.settings = settings
+
+    async def get_client(self, installation_id: int) -> httpx.AsyncClient:
+        """Get an authenticated client for GitHub API requests"""
+        client = GitHubClient(self.settings)
+        client = await client.initialize(installation_id)
+        return client
+
     def parse_review_command(self, comment: str) -> Optional[Dict[str, Any]]:
         """Parse review command from comment text using argparse.
         
@@ -150,7 +165,6 @@ class GitHubService:
         parser.add_argument(
             "-a", "--areas",
             action="append",
-            choices=["security", "performance", "maintainability", "style", "quality"],
             metavar="AREA",
             default=[],
             help="Areas to focus the review on (can repeat). "
@@ -203,76 +217,6 @@ class GitHubService:
             logger.error(f"Failed to parse review command: {str(e)}")
             return None
     
-    def should_auto_review(self, repo_full_name: str) -> bool:
-        """Check if auto-review is enabled for this repository"""
-        # This could be enhanced to check against a database or config file
-        # For now, just a simple example
-        auto_review_repos = ["your-org/your-repo"]
-        return repo_full_name in auto_review_repos
-    
-    async def get_pull_request_files(
-        self, 
-        client: httpx.AsyncClient,
-        repo: str, 
-        pr_number: int
-    ) -> List[Dict[str, Any]]:
-        """Get files modified in a pull request"""
-        return await self._request_json(
-            client,
-            "GET",
-            f"/repos/{repo}/pulls/{pr_number}/files"
-        )
-    
-    async def get_file_content(
-        self, 
-        client: httpx.AsyncClient,
-        repo: str, 
-        file_path: str, 
-        ref: str
-    ) -> str:
-        """Get content of a file from GitHub"""
-        data = await self._request_json(
-            client,
-            "GET",
-            f"/repos/{repo}/contents/{file_path}",
-            params={"ref": ref}
-        )
-        import base64
-        return base64.b64decode(data["content"]).decode("utf-8")
-    
-    async def post_review_comment(
-        self, 
-        client: httpx.AsyncClient,
-        repo: str, 
-        pr_number: int, 
-        comment: str
-    ) -> int:
-        """Post a comment on a pull request"""
-        payload = {"body": comment}
-        return await self._request_json(
-            client,
-            "POST",
-            f"/repos/{repo}/issues/{pr_number}/comments",
-            expected_status=201,
-            json=payload
-        )
-    
-    async def edit_review_comment(
-        self,
-        client: httpx.AsyncClient,
-        repo: str,
-        comment_id: int,
-        new_comment: str
-    ) -> None:
-        """Edit an existing PR review comment"""
-        payload = {"body": new_comment}
-        await self._request_json(
-            client,
-            "PATCH",
-            f"/repos/{repo}/issues/comments/{comment_id}",
-            json=payload
-        )
-    
     async def process_review_command(
         self,
         event: IssueCommentEvent,
@@ -293,8 +237,7 @@ class GitHubService:
 
             # Fetch existing bot comment for create-or-update
             try:
-                comments = await self._request_json(
-                    client,
+                comments = await client._request_json(
                     "GET",
                     f"/repos/{repo}/issues/{pr_number}/comments"
                 )
@@ -320,8 +263,7 @@ class GitHubService:
 
             # Fetch PR metadata once
             try:
-                pr_data = await self._request_json(
-                    client,
+                pr_data = await client._request_json(
                     "GET",
                     f"/repos/{repo}/pulls/{pr_number}"
                 )
@@ -391,3 +333,69 @@ class GitHubService:
                     )
                 except Exception as comment_error:
                     logger.error(f"Failed to post error comment: {str(comment_error)}")
+
+    def should_auto_review(self, repo_full_name: str) -> bool:
+        """Check if auto-review is enabled for this repository"""
+        # This could be enhanced to check against a database or config file
+        # For now, just a simple example
+        auto_review_repos = ["your-org/your-repo"]
+        return repo_full_name in auto_review_repos
+    
+    async def get_pull_request_files(
+        self, 
+        client: "GithubClient",
+        repo: str, 
+        pr_number: int
+    ) -> List[Dict[str, Any]]:
+        """Get files modified in a pull request"""
+        return await client._request_json(
+            "GET",
+            f"/repos/{repo}/pulls/{pr_number}/files"
+        )
+
+    async def get_file_content(
+        self, 
+        client: "GithubClient",
+        repo: str, 
+        file_path: str, 
+        ref: str
+    ) -> str:
+        """Get content of a file from GitHub"""
+        data = await client._request_json(
+            "GET",
+            f"/repos/{repo}/contents/{file_path}",
+            params={"ref": ref}
+        )
+        import base64
+        return base64.b64decode(data["content"]).decode("utf-8")
+    
+    async def post_review_comment(
+        self, 
+        client: "GithubClient",
+        repo: str, 
+        pr_number: int, 
+        comment: str
+    ) -> int:
+        """Post a comment on a pull request"""
+        payload = {"body": comment}
+        return await client._request_json(
+            "POST",
+            f"/repos/{repo}/issues/{pr_number}/comments",
+            expected_status=201,
+            json=payload
+        )
+    
+    async def edit_review_comment(
+        self,
+        client: "GithubClient",
+        repo: str,
+        comment_id: int,
+        new_comment: str
+    ) -> None:
+        """Edit an existing PR review comment"""
+        payload = {"body": new_comment}
+        await client._request_json(
+            "PATCH",
+            f"/repos/{repo}/issues/comments/{comment_id}",
+            json=payload
+        )
