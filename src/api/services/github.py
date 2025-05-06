@@ -15,6 +15,9 @@ from api.services.code_review import CodeReviewService
 
 logger = logging.getLogger("byte-patrol.github")
 
+# how long our JWT should live, in seconds
+DEFAULT_JWT_EXPIRY_SEC = 10 * 60
+
 class GitHubService:
     def __init__(self, settings: Settings = Depends(get_settings)):
         self.settings = settings
@@ -25,7 +28,7 @@ class GitHubService:
         now = int(time.time())
         payload = {
             "iat": now,
-            "exp": now + (10 * 60),  # 10 minutes expiration
+            "exp": now + DEFAULT_JWT_EXPIRY_SEC,  # 10 minutes expiration
             "iss": self.settings.github_app_id
         }
         
@@ -73,7 +76,7 @@ class GitHubService:
         try:
             idx = tokens.index("review")
         except ValueError:
-            logger.error("No review command found from comment: %s ...", comment[:20])
+            logger.debug("No review command found in comment: %s ...", comment[:20])
             return None
         args = tokens[idx+1:]
         files: List[str] = []

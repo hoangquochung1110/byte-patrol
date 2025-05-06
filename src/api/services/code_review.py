@@ -13,9 +13,14 @@ from byte_patrol.config import get_llm
 
 logger = logging.getLogger("byte-patrol.code_review")
 
+
+DEFAULT_REVIEW_STYLE = "Concise"
+DEFAULT_FILE_TYPES = ("py",)
+
+
 class CodeReviewService:
     def __init__(self):
-        self.allowed_file_types = ["py"]  # Default to Python files only
+        self.allowed_file_types = DEFAULT_FILE_TYPES  # Default to Python files only
 
     def set_allowed_file_types(self, file_types: list[str]):
         """Set the allowed file types for review"""
@@ -62,7 +67,7 @@ class CodeReviewService:
             
             # Structure review style
             if style is None:
-                style = "Concise"
+                style = DEFAULT_REVIEW_STYLE
 
             # Setup structured output capabilities
             review_llm = llm.with_structured_output(CodeReview)
