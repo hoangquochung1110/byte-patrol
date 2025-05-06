@@ -44,17 +44,20 @@ class GitHubService:
                 "Accept": "application/vnd.github.v3+json"
             }
             
-            response = await client.post(
-                f"{self.base_url}/app/installations/{installation_id}/access_tokens",
-                headers=headers
-            )
-            
-            if response.status_code != 201:
-                logger.error(f"Failed to get installation token: {response.text}")
-                raise Exception(f"GitHub API error: {response.status_code}")
-                
-            data = response.json()
-            return data["token"]
+            try:
+                response = await client.post(
+                    f"{self.base_url}/app/installations/{installation_id}/access_tokens",
+                    headers=headers
+                )
+                response.raise_for_status()
+                data = response.json()
+                return data["token"]
+            except httpx.HTTPStatusError as e:
+                logger.error(f"Failed to get installation token: {e.response.text}")
+                raise Exception(f"GitHub API error: {e.response.status_code}") from e
+            except httpx.RequestError as e:
+                logger.error(f"Request failed while getting installation token: {str(e)}")
+                raise Exception("Failed to connect to GitHub API") from e
     
     async def get_client(self, installation_id: int) -> httpx.AsyncClient:
         """Get an authenticated client for GitHub API requests"""
@@ -127,13 +130,16 @@ class GitHubService:
         pr_number: int
     ) -> List[Dict[str, Any]]:
         """Get files modified in a pull request"""
-        response = await client.get(f"/repos/{repo}/pulls/{pr_number}/files")
-        
-        if response.status_code != 200:
-            logger.error(f"Failed to get PR files: {response.text}")
-            raise Exception(f"GitHub API error: {response.status_code}")
-            
-        return response.json()
+        try:
+            response = await client.get(f"/repos/{repo}/pulls/{pr_number}/files")
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Failed to get PR files: {e.response.text}")
+            raise Exception(f"GitHub API error: {e.response.status_code}") from e
+        except httpx.RequestError as e:
+            logger.error(f"Request failed while getting PR files: {str(e)}")
+            raise Exception("Failed to connect to GitHub API") from e
     
     async def get_file_content(
         self, 
@@ -143,18 +149,21 @@ class GitHubService:
         ref: str
     ) -> str:
         """Get content of a file from GitHub"""
-        response = await client.get(
-            f"/repos/{repo}/contents/{file_path}",
-            params={"ref": ref}
-        )
-        
-        if response.status_code != 200:
-            logger.error(f"Failed to get file content: {response.text}")
-            raise Exception(f"GitHub API error: {response.status_code}")
-            
-        data = response.json()
-        import base64
-        return base64.b64decode(data["content"]).decode("utf-8")
+        try:
+            response = await client.get(
+                f"/repos/{repo}/contents/{file_path}",
+                params={"ref": ref}
+            )
+            response.raise_for_status()
+            data = response.json()
+            import base64
+            return base64.b64decode(data["content"]).decode("utf-8")
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Failed to get file content: {e.response.text}")
+            raise Exception(f"GitHub API error: {e.response.status_code}") from e
+        except httpx.RequestError as e:
+            logger.error(f"Request failed while getting file content: {str(e)}")
+            raise Exception("Failed to connect to GitHub API") from e
     
     async def post_review_comment(
         self, 
@@ -164,18 +173,20 @@ class GitHubService:
         comment: str
     ) -> int:
         """Post a comment on a pull request"""
-        payload = {"body": comment}
-        response = await client.post(
-            f"/repos/{repo}/issues/{pr_number}/comments",
-            json=payload
-        )
-        
-        if response.status_code != 201:
-            logger.error(f"Failed to post comment: {response.text}")
-            raise Exception(f"GitHub API error: {response.status_code}")
-        
-        data = response.json()
-        return data
+        try:
+            payload = {"body": comment}
+            response = await client.post(
+                f"/repos/{repo}/issues/{pr_number}/comments",
+                json=payload
+            )
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Failed to post comment: {e.response.text}")
+            raise Exception(f"GitHub API error: {e.response.status_code}") from e
+        except httpx.RequestError as e:
+            logger.error(f"Request failed while posting comment: {str(e)}")
+            raise Exception("Failed to connect to GitHub API") from e
     
     async def edit_review_comment(
         self,
@@ -185,15 +196,19 @@ class GitHubService:
         new_comment: str
     ) -> None:
         """Edit an existing PR review comment"""
-        payload = {"body": new_comment}
-        response = await client.patch(
-            f"/repos/{repo}/issues/comments/{comment_id}",
-            json=payload
-        )
-
-        if response.status_code != 200:
-            logger.error(f"Failed to edit comment {comment_id}: {response.text}")
-            raise Exception(f"GitHub API error: {response.status_code}")
+        try:
+            payload = {"body": new_comment}
+            response = await client.patch(
+                f"/repos/{repo}/issues/comments/{comment_id}",
+                json=payload
+            )
+            response.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Failed to edit comment {comment_id}: {e.response.text}")
+            raise Exception(f"GitHub API error: {e.response.status_code}") from e
+        except httpx.RequestError as e:
+            logger.error(f"Request failed while editing comment: {str(e)}")
+            raise Exception("Failed to connect to GitHub API") from e
     
     async def process_review_command(
         self,
@@ -202,6 +217,7 @@ class GitHubService:
         code_review_service: CodeReviewService
     ) -> None:
         """Process a review command from a comment"""
+        client = None
         try:
             # Create single client for all operations
             client = await self.get_client(event.installation.id)
@@ -213,15 +229,20 @@ class GitHubService:
             code_review_service.set_allowed_file_types(file_types)
 
             # Fetch existing bot comment for create-or-update
-            comments_resp = await client.get(f"/repos/{repo}/issues/{pr_number}/comments")
-            if comments_resp.status_code != 200:
-                logger.error(f"Failed to list comments: {comments_resp.text}")
-                raise Exception(f"GitHub API error: {comments_resp.status_code}")
-            existing_comments = comments_resp.json()
-            existing_bot = next(
-                (c for c in existing_comments if c["body"].startswith("## Byte Patrol Code Review")),
-                None
-            )
+            try:
+                comments_resp = await client.get(f"/repos/{repo}/issues/{pr_number}/comments")
+                comments_resp.raise_for_status()
+                existing_comments = comments_resp.json()
+                existing_bot = next(
+                    (c for c in existing_comments if c["body"].startswith("## Byte Patrol Code Review")),
+                    None
+                )
+            except httpx.HTTPStatusError as e:
+                logger.error(f"Failed to list comments: {e.response.text}")
+                raise Exception(f"GitHub API error: {e.response.status_code}") from e
+            except httpx.RequestError as e:
+                logger.error(f"Request failed while listing comments: {str(e)}")
+                raise Exception("Failed to connect to GitHub API") from e
 
             # Get PR files
             files = await self.get_pull_request_files(client, repo, pr_number)
@@ -236,12 +257,17 @@ class GitHubService:
                 return
 
             # Fetch PR metadata once
-            pr_resp = await client.get(f"/repos/{repo}/pulls/{pr_number}")
-            if pr_resp.status_code != 200:
-                logger.error(f"Failed to get PR metadata: {pr_resp.text}")
-                raise Exception(f"GitHub API error: {pr_resp.status_code}")
-            pr = PullRequest(**pr_resp.json())
-            ref = pr.head.ref
+            try:
+                pr_resp = await client.get(f"/repos/{repo}/pulls/{pr_number}")
+                pr_resp.raise_for_status()
+                pr = PullRequest(**pr_resp.json())
+                ref = pr.head.ref
+            except httpx.HTTPStatusError as e:
+                logger.error(f"Failed to get PR metadata: {e.response.text}")
+                raise Exception(f"GitHub API error: {e.response.status_code}") from e
+            except httpx.RequestError as e:
+                logger.error(f"Request failed while getting PR metadata: {str(e)}")
+                raise Exception("Failed to connect to GitHub API") from e
 
             # Prepare review parameters
             areas_arg = command.get("areas") or None
@@ -257,21 +283,25 @@ class GitHubService:
                     continue
                 try:
                     content = await self.get_file_content(client, repo, f["filename"], ref)
-                except Exception as e:
-                    logger.error(f"Failed to get file content: {str(e)}")
+                except (httpx.HTTPStatusError, httpx.RequestError) as e:
+                    logger.error(f"Failed to get file content for {f['filename']}: {str(e)}")
                     continue
                 else:
-                    result = await code_review_service.review_code(
-                        content,
-                        f["filename"],
-                        areas_arg,
-                        style_arg,
-                    )
-                    if "Skipping review: File type not supported" in result:
-                        skipped_count += 1
-                    else:
-                        reviewed_count += 1
-                        sections.append(f"### {f['filename']}\n\n{result}")
+                    try:
+                        result = await code_review_service.review_code(
+                            content,
+                            f["filename"],
+                            areas_arg,
+                            style_arg,
+                        )
+                        if "Skipping review: File type not supported" in result:
+                            skipped_count += 1
+                        else:
+                            reviewed_count += 1
+                            sections.append(f"### {f['filename']}\n\n{result}")
+                    except Exception as e:
+                        logger.error(f"Failed to review file {f['filename']}: {str(e)}")
+                        continue
 
             # Create summary header
             summary = [
@@ -289,12 +319,13 @@ class GitHubService:
             
         except Exception as e:
             logger.exception(f"Error processing review command: {str(e)}")
-            try:
-                await self.post_review_comment(
-                    client,
-                    repo,
-                    pr_number,
-                    f"❌ Error during code review: {str(e)}"
-                )
-            except:
-                pass
+            if client:
+                try:
+                    await self.post_review_comment(
+                        client,
+                        repo,
+                        pr_number,
+                        f"❌ Error during code review: {str(e)}"
+                    )
+                except Exception as comment_error:
+                    logger.error(f"Failed to post error comment: {str(comment_error)}")
