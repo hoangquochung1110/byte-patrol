@@ -1,5 +1,7 @@
 # GitHub API interactions
+import base64
 import logging
+
 import re
 import shlex
 import time
@@ -145,7 +147,12 @@ class GitHubService:
         - quality: General code quality
         """
         # Tokenize comment and locate 'review' command
-        tokens = shlex.split(comment)
+        logger.debug(comment)
+        try:
+            tokens = shlex.split(comment)
+        except ValueError:
+            logger.debug("Can not split comment: %s", comment)
+            return None
         try:
             idx = tokens.index("review")
         except ValueError:
@@ -223,7 +230,7 @@ class GitHubService:
         command: Dict[str, Any],
         code_review_service: CodeReviewService
     ) -> None:
-        """Process a review command from a comment"""
+        """Process a review command from a comment."""
         client = None
         try:
             # Create single client for all operations
@@ -236,18 +243,7 @@ class GitHubService:
             code_review_service.set_allowed_file_types(file_types)
 
             # Fetch existing bot comment for create-or-update
-            try:
-                comments = await client._request_json(
-                    "GET",
-                    f"/repos/{repo}/issues/{pr_number}/comments"
-                )
-                existing_bot = next(
-                    (c for c in comments if c["body"].startswith("## Byte Patrol Code Review")),
-                    None
-                )
-            except Exception as e:
-                logger.error(f"Failed to list comments: {str(e)}")
-                raise
+            existing_bot = await self._fetch_existing_bot_comment(client, repo, pr_number)
 
             # Get PR files
             files = await self.get_pull_request_files(client, repo, pr_number)
@@ -262,16 +258,14 @@ class GitHubService:
                 return
 
             # Fetch PR metadata once
-            try:
-                pr_data = await client._request_json(
-                    "GET",
-                    f"/repos/{repo}/pulls/{pr_number}"
-                )
-                pr = PullRequest(**pr_data)
-                ref = pr.head.ref
-            except Exception as e:
-                logger.error(f"Failed to get PR metadata: {str(e)}")
-                raise
+
+            pr_data = await client._request_json(
+                "GET",
+                f"/repos/{repo}/pulls/{pr_number}"
+            )
+            pr = PullRequest(**pr_data)
+            ref = pr.head.ref
+
 
             # Prepare review parameters
             areas_arg = command.get("areas") or None
@@ -287,7 +281,7 @@ class GitHubService:
                     continue
                 try:
                     content = await self.get_file_content(client, repo, f["filename"], ref)
-                except (httpx.HTTPStatusError, httpx.RequestError) as e:
+                except Exception as e:
                     logger.error(f"Failed to get file content for {f['filename']}: {str(e)}")
                     continue
                 else:
@@ -366,7 +360,6 @@ class GitHubService:
             f"/repos/{repo}/contents/{file_path}",
             params={"ref": ref}
         )
-        import base64
         return base64.b64decode(data["content"]).decode("utf-8")
     
     async def post_review_comment(
@@ -398,4 +391,15 @@ class GitHubService:
             "PATCH",
             f"/repos/{repo}/issues/comments/{comment_id}",
             json=payload
+        )
+
+    async def _fetch_existing_bot_comment(self, client, repo, pr_number):
+        """Fetch the existing bot comment for a PR, if any."""
+        comments = await client._request_json(
+            "GET",
+            f"/repos/{repo}/issues/{pr_number}/comments"
+        )
+        return next(
+            (c for c in comments if c["body"].startswith("## Byte Patrol Code Review")),
+            None
         )
