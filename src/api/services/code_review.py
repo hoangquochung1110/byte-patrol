@@ -52,6 +52,7 @@ class CodeReviewService:
         """
         try:
             if not self.can_review_file(filename):
+                logger.debug(f"Skipping review: File type not supported for {filename}")
                 return f"⚠️ Skipping review: File type not supported for {filename}"
 
             logger.info(f"Reviewing file: {filename}")
@@ -80,21 +81,28 @@ class CodeReviewService:
                     {"code": content, "areas": areas_str, "style": style}
                 )
             except TypeError as e:
-                logger.error(f"Failed to review code: {str(e)}")
+                logger.error(f"Type error during code review for {filename}: {str(e)}")
+                return f"⚠️ Error during code review: {str(e)}"
+            except Exception as e:
+                logger.error(f"Unexpected error during code review for {filename}: {str(e)}")
                 return f"⚠️ Error during code review: {str(e)}"
             else:
-                suggestion_result = (code_suggestion_prompt | suggestion_llm).invoke(
-                    {"code_review": review_result.model_dump_json()}
-                )
-                # Format the results as markdown
-                return self._format_review_results(
-                    review_result, 
-                    suggestion_result, 
-                    filename
-                )
+                try:
+                    suggestion_result = (code_suggestion_prompt | suggestion_llm).invoke(
+                        {"code_review": review_result.model_dump_json()}
+                    )
+                    # Format the results as markdown
+                    return self._format_review_results(
+                        review_result, 
+                        suggestion_result, 
+                        filename
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to generate suggestions for {filename}: {str(e)}")
+                    return f"⚠️ Error generating suggestions: {str(e)}"
             
         except Exception as e:
-            logger.exception(f"Error reviewing code: {str(e)}")
+            logger.exception(f"Critical error reviewing {filename}: {str(e)}")
             return f"⚠️ Error during code review: {str(e)}"
     
     def _get_review_areas(self, filename: str) -> list[str]:
