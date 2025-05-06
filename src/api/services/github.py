@@ -4,6 +4,7 @@ import re
 import shlex
 import time
 from typing import Any, Dict, List, Optional
+from argparse import ArgumentParser
 
 import httpx
 import jwt
@@ -74,7 +75,13 @@ class GitHubService:
         )
     
     def parse_review_command(self, comment: str) -> Optional[Dict[str, Any]]:
-        """Parse review command from comment text"""
+        """Parse review command from comment text using argparse.
+        
+        Example commands:
+        - review file1.py file2.py
+        - review -a security -a performance file1.py
+        - review --style detailed -t py,js file1.py file2.js
+        """
         # Tokenize comment and locate 'review' command
         tokens = shlex.split(comment)
         try:
@@ -82,39 +89,52 @@ class GitHubService:
         except ValueError:
             logger.debug("No review command found in comment: %s ...", comment[:20])
             return None
+
+        # Parse arguments after 'review'
         args = tokens[idx+1:]
-        files: List[str] = []
-        areas: List[str] = []
-        style: Optional[str] = None
-        file_types: List[str] = ["py"]  # Default to Python files only
-        i = 0
-        while i < len(args):
-            arg = args[i]
-            if arg in ("-a", "--areas", "-areas"):
-                if i + 1 < len(args):
-                    areas.append(args[i+1])
-                    i += 2
-                    continue
-            elif arg in ("-s", "--style"):
-                if i + 1 < len(args):
-                    style = args[i+1]
-                    i += 2
-                    continue
-            elif arg in ("-t", "--type", "--file-type"):
-                if i + 1 < len(args):
-                    file_types = args[i+1].split(",")
-                    i += 2
-                    continue
-            elif Path(arg).suffix:
-                files.append(arg)
-            i += 1
-        return {
-            "type": "review",
-            "files": files,
-            "areas": areas,
-            "style": style,
-            "file_types": file_types,
-        }
+        parser = ArgumentParser(prog="review", add_help=False)
+        
+        # Define command options
+        parser.add_argument(
+            "-a", "--areas",
+            action="append",
+            default=[],
+            help="Areas to focus the review on (can repeat)"
+        )
+        parser.add_argument(
+            "-s", "--style",
+            type=str,
+            help="Review style guidance"
+        )
+        parser.add_argument(
+            "-t", "--type", "--file-type",
+            dest="file_types",
+            type=lambda s: s.split(","),
+            default=["py"],
+            help="Comma-separated file extensions to review"
+        )
+        # Any remaining args are treated as filenames
+        parser.add_argument(
+            "files",
+            nargs="*",
+            help="Specific filenames to review"
+        )
+
+        try:
+            namespace, unknown = parser.parse_known_args(args)
+            if unknown:
+                logger.warning(f"Ignoring unknown arguments: {unknown}")
+            
+            return {
+                "type": "review",
+                "files": namespace.files,
+                "areas": namespace.areas,
+                "style": namespace.style,
+                "file_types": namespace.file_types,
+            }
+        except Exception as e:
+            logger.error(f"Failed to parse review command: {str(e)}")
+            return None
     
     def should_auto_review(self, repo_full_name: str) -> bool:
         """Check if auto-review is enabled for this repository"""
