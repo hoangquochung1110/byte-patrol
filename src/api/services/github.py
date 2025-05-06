@@ -79,6 +79,19 @@ class GitHubService:
         - review file1.py file2.py
         - review -a security -a performance file1.py
         - review --style detailed -t py,js file1.py file2.js
+        
+        Available review styles:
+        - concise: Brief, focused feedback
+        - detailed: Comprehensive analysis
+        - strict: Focus on potential issues
+        - lenient: Focus on major issues only
+        
+        Available review areas:
+        - security: Security vulnerabilities
+        - performance: Performance optimizations
+        - maintainability: Code maintainability
+        - style: Code style and conventions
+        - quality: General code quality
         """
         # Tokenize comment and locate 'review' command
         tokens = shlex.split(comment)
@@ -90,32 +103,45 @@ class GitHubService:
 
         # Parse arguments after 'review'
         args = tokens[idx+1:]
-        parser = ArgumentParser(prog="review", add_help=False)
+        parser = ArgumentParser(
+            prog="review",
+            add_help=False,
+            description="Review code changes in the pull request",
+            formatter_class=argparse.RawDescriptionHelpFormatter
+        )
         
         # Define command options
         parser.add_argument(
             "-a", "--areas",
             action="append",
+            choices=["security", "performance", "maintainability", "style", "quality"],
+            metavar="AREA",
             default=[],
-            help="Areas to focus the review on (can repeat)"
+            help="Areas to focus the review on (can repeat). "
+                 "Choices: security, performance, maintainability, style, quality"
         )
         parser.add_argument(
             "-s", "--style",
             type=str,
-            help="Review style guidance"
+            choices=["concise", "detailed", "strict", "lenient"],
+            metavar="STYLE",
+            help="Review style guidance. "
+                 "Choices: concise (default), detailed, strict, lenient"
         )
         parser.add_argument(
             "-t", "--type", "--file-type",
             dest="file_types",
-            type=lambda s: s.split(","),
+            type=lambda s: [ext.strip().lstrip('.') for ext in s.split(",")],
+            metavar="EXTENSIONS",
             default=list(DEFAULT_FILE_TYPES),
-            help="Comma-separated file extensions to review"
+            help=f"Comma-separated file extensions to review (default: {','.join(DEFAULT_FILE_TYPES)})"
         )
         # Any remaining args are treated as filenames
         parser.add_argument(
             "files",
             nargs="*",
-            help="Specific filenames to review"
+            metavar="FILE",
+            help="Specific files to review (default: all changed files)"
         )
 
         try:
@@ -123,11 +149,18 @@ class GitHubService:
             if unknown:
                 logger.warning(f"Ignoring unknown arguments: {unknown}")
             
+            # Validate file extensions
+            for ext in namespace.file_types:
+                if not ext.isalnum():
+                    logger.warning(f"Invalid file extension: {ext}")
+                    namespace.file_types = list(DEFAULT_FILE_TYPES)
+                    break
+            
             return {
                 "type": "review",
                 "files": namespace.files,
                 "areas": namespace.areas,
-                "style": namespace.style,
+                "style": namespace.style or "concise",  # Default to concise if not specified
                 "file_types": namespace.file_types,
             }
         except Exception as e:
