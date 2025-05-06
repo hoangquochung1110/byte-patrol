@@ -72,6 +72,7 @@ class GitHubService:
         try:
             idx = tokens.index("review")
         except ValueError:
+            logger.error("No review command found from comment: %s", comment)
             return None
         args = tokens[idx+1:]
         files: List[str] = []
