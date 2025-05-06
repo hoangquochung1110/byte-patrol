@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 import httpx
 import jwt
 from fastapi import Depends
+from pathlib import Path
 
 from api.config import Settings, get_settings
 from api.models import IssueCommentEvent, PullRequest, PullRequestEvent
@@ -101,7 +102,7 @@ class GitHubService:
                     file_types = args[i+1].split(",")
                     i += 2
                     continue
-            elif re.match(r"[\w./\-]+\.[A-Za-z0-9]+", arg):
+            elif Path(arg).suffix:
                 files.append(arg)
             i += 1
         return {
